@@ -49,6 +49,7 @@ const DUMMY_PLAYERS = {
 }
 
 // Types
+// @ts-ignore - Will be used in future implementation
 interface Tile {
   letter: string
   points: number
@@ -56,14 +57,17 @@ interface Tile {
   id: string
 }
 
+// @ts-ignore - Will be used in future implementation
 interface AudioContextType extends AudioContext {
   webkitAudioContext?: typeof AudioContext
 }
 
+// @ts-ignore - Will be used in future implementation
 interface Sound {
   (): void
 }
 
+// @ts-ignore - Will be used in future implementation
 interface Sounds {
   tileClick: () => void
   wordSuccess: () => void
@@ -73,11 +77,13 @@ interface Sounds {
 }
 
 // Screen Component Types
+// @ts-ignore - Will be used in future implementation
 interface LobbyScreenProps {
   players: typeof DUMMY_PLAYERS.joiningPlayers
   onStart: () => void
 }
 
+// @ts-ignore - Will be used in future implementation
 interface GameScreenProps {
   score: number
   wordsFound: number
@@ -95,6 +101,7 @@ interface GameScreenProps {
   feedback: GameFeedback | null
 }
 
+// @ts-ignore - Will be used in future implementation
 interface EndScreenProps {
   finalScore: number
   wordsFound: number
@@ -108,11 +115,7 @@ interface Dictionary {
 }
 
 // Dictionary validation (you would typically load this from an API)
-const DICTIONARY = new Set([
-  'cat', 'dog', 'bird', 'house', 'tree', 'flower', 'book', 'table', 'chair',
-  'computer', 'phone', 'water', 'food', 'sleep', 'walk', 'run', 'jump', 'play',
-  // ... add more words as needed
-])
+// const DICTIONARY = new Set([...])
 
 // Define window.AudioContext
 declare global {
@@ -425,62 +428,62 @@ const App = () => {
   }
 
   // Word List Management
-  const addWordToList = (word: string, points: number) => {
-    const wordsList = document.querySelector('.words-list')
-    if (!wordsList) return
+  // const addWordToList = (word: string, points: number) => {
+  //   const wordsList = document.querySelector('.words-list')
+  //   if (!wordsList) return
 
-    const wordItem = document.createElement('div')
-    wordItem.className = 'word-item'
-    wordItem.innerHTML = `
-      <span class="word">${word.toUpperCase()}</span>
-      <span class="score">${points}</span>
-    `
+  //   const wordItem = document.createElement('div')
+  //   wordItem.className = 'word-item'
+  //   wordItem.innerHTML = `
+  //     <span class="word">${word.toUpperCase()}</span>
+  //     <span class="score">${points}</span>
+  //   `
 
-    if (wordsList.firstChild) {
-      wordsList.insertBefore(wordItem, wordsList.firstChild)
-    } else {
-      wordsList.appendChild(wordItem)
-    }
-  }
+  //   if (wordsList.firstChild) {
+  //     wordsList.insertBefore(wordItem, wordsList.firstChild)
+  //   } else {
+  //     wordsList.appendChild(wordItem)
+  //   }
+  // }
 
   // Update Top Words
-  const updateTopWords = () => {
-    const topWords = Array.from(usedWords)
-      .map(word => ({
-        word: word.toUpperCase(),
-        score: calculateWordScore(word)
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
+  // const updateTopWords = () => {
+  //   const topWords = Array.from(usedWords)
+  //     .map(word => ({
+  //       word: word.toUpperCase(),
+  //       score: calculateWordScore(word)
+  //     }))
+  //     .sort((a, b) => b.score - a.score)
+  //     .slice(0, 5)
 
-    const container = document.querySelector('.top-words')
-    if (container) {
-      container.innerHTML = `
-        <h3>Top Words</h3>
-        ${topWords.map(({word, score}) => `
-          <div class="word-row">
-            <span class="word">${word}</span>
-            <span class="points">${score} pts</span>
-          </div>
-        `).join('')}
-      `
-    }
-  }
+  //   const container = document.querySelector('.top-words')
+  //   if (container) {
+  //     container.innerHTML = `
+  //       <h3>Top Words</h3>
+  //       ${topWords.map(({word, score}) => `
+  //         <div class="word-row">
+  //           <span class="word">${word}</span>
+  //           <span class="points">${score} pts</span>
+  //         </div>
+  //       `).join('')}
+  //     `
+  //   }
+  // }
 
   // Feedback Display
-  const showFeedback = (type: 'success' | 'error' | 'warning', message: string) => {
-    const wordDisplay = document.querySelector('.word-display')
-    if (!wordDisplay) return
+  // const showFeedback = (type: 'success' | 'error' | 'warning', message: string) => {
+  //   const wordDisplay = document.querySelector('.word-display')
+  //   if (!wordDisplay) return
 
-    wordDisplay.textContent = message
-    wordDisplay.className = `word-display feedback`
-    wordDisplay.setAttribute('data-type', type)
+  //   wordDisplay.textContent = message
+  //   wordDisplay.className = `word-display feedback`
+  //   wordDisplay.setAttribute('data-type', type)
 
-    setTimeout(() => {
-      wordDisplay.className = 'word-display'
-      wordDisplay.textContent = currentWord || 'ENTER YOUR WORD'
-    }, 1000)
-  }
+  //   setTimeout(() => {
+  //     wordDisplay.className = 'word-display'
+  //     wordDisplay.textContent = currentWord || 'ENTER YOUR WORD'
+  //   }, 1000)
+  // }
 
   // Handle keyboard controls
   useEffect(() => {
@@ -652,7 +655,6 @@ const GameScreen: React.FC<GameScreenProps> = ({
   timeLeft,
   currentWord,
   tiles,
-  selectedTiles,
   usedWords,
   activePlayers,
   onTileClick,
@@ -687,7 +689,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         <div className="column">
           <h2>LEADERBOARD</h2>
           <div className="leaderboard">
-            {activePlayers.map((player, index) => (
+            {activePlayers.map((player) => (
               <div key={player.id} className="player-row">
                 <span className="player-name">{player.name}</span>
                 <span className="player-score">{player.score}</span>
@@ -773,14 +775,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
 }
 
 // Helper function to check if tiles are adjacent
-const isAdjacent = (index1: number, index2: number) => {
-  const row1 = Math.floor(index1 / 4)
-  const col1 = index1 % 4
-  const row2 = Math.floor(index2 / 4)
-  const col2 = index2 % 4
-  
-  return Math.abs(row1 - row2) <= 1 && Math.abs(col1 - col2) <= 1
-}
+// const isAdjacent = (index1: number, index2: number) => {
+//   const row1 = Math.floor(index1 / 4)
+//   const col1 = index1 % 4
+//   const row2 = Math.floor(index2 / 4)
+//   const col2 = index2 % 4
+//   
+//   return Math.abs(row1 - row2) <= 1 && Math.abs(col1 - col2) <= 1
+// }
 
 const EndScreen: React.FC<{
   finalScore: number
