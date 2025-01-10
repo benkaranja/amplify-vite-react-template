@@ -518,7 +518,7 @@ const App = () => {
         }
 
         // If not in cache, fetch from file
-        const response = await fetch('/dictionary.json')
+        const response = await fetch('/src/assets/dictionary.json')
         const data: Dictionary = await response.json()
         
         // Convert to Set for O(1) lookups and store in lowercase
