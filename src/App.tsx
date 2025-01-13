@@ -81,6 +81,8 @@ interface Sounds {
 interface LobbyScreenProps {
   players: typeof DUMMY_PLAYERS.joiningPlayers
   onStart: () => void
+  isSoundEnabled: boolean
+  onToggleSound: () => void
 }
 
 // @ts-ignore - Will be used in future implementation
@@ -93,12 +95,15 @@ interface GameScreenProps {
   selectedTiles: number[]
   usedWords: Set<string>
   activePlayers: typeof DUMMY_PLAYERS.activePlayers
+  dictionary: Set<string>
   onTileClick: (index: number) => void
   onSubmitWord: () => void
   onClear: () => void
   onShuffle: () => void
   calculateWordScore: (word: string) => number
   feedback: GameFeedback | null
+  setFeedback: (feedback: GameFeedback | null) => void
+  playSound: (soundName: string) => void
 }
 
 // @ts-ignore - Will be used in future implementation
@@ -157,10 +162,37 @@ const App = () => {
   const [dictionary, setDictionary] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<GameFeedback | null>(null)
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true)
   
   const audioContext = useRef<AudioContext | null>(null)
   const sounds = useRef<{[key: string]: () => void}>({})
   const gameTimer = useRef<NodeJS.Timeout | null>(null)
+
+  // Move playSound to component level
+  const playSound = (soundName: string) => {
+    if (!isSoundEnabled || !audioInitialized || !sounds.current[soundName]) {
+      return;
+    }
+    
+    if (audioContext.current?.state !== 'running') {
+      console.warn('AudioContext not running, attempting to resume...')
+      audioContext.current?.resume().then(() => {
+        console.log('AudioContext resumed, playing sound...')
+        try {
+          sounds.current[soundName]()
+        } catch (error) {
+          console.error(`Error playing sound "${soundName}":`, error)
+        }
+      })
+      return
+    }
+    
+    try {
+      sounds.current[soundName]()
+    } catch (error) {
+      console.error(`Error playing sound "${soundName}":`, error)
+    }
+  }
 
   // Generate initial tiles with unique letters and all vowels
   const generateInitialTiles = () => {
@@ -230,28 +262,28 @@ const App = () => {
 
   // Handle word submit with score calculation
   const handleWordSubmit = () => {
-    if (currentWord.length < 3) {
+    if (currentWord.length < 1) {
       setFeedback({
         message: 'Word must be at least 3 letters long',
         type: 'error',
         timestamp: Date.now()
-      })
-      playSound('wordError')
-      clearSelection()
-      return
+      });
+      playSound('wordError');
+      clearSelection();
+      return;
     }
     
-    const wordLower = currentWord.toLowerCase()
+    const wordLower = currentWord.toLowerCase();
     
     if (usedWords.has(wordLower)) {
       setFeedback({
         message: 'Word already found!',
         type: 'error',
         timestamp: Date.now()
-      })
-      playSound('wordError')
-      clearSelection()
-      return
+      });
+      playSound('wordError');
+      clearSelection();
+      return;
     }
 
     if (!dictionary.has(wordLower)) {
@@ -259,24 +291,24 @@ const App = () => {
         message: 'Word not in dictionary!',
         type: 'error',
         timestamp: Date.now()
-      })
-      playSound('wordError')
-      clearSelection()
-      return
+      });
+      playSound('wordError');
+      clearSelection();
+      return;
     }
 
-    const wordScore = calculateWordScore(currentWord)
-    setScore(prev => prev + wordScore)
-    setWordsFound(prev => prev + 1)
-    setUsedWords(prev => new Set([...prev, wordLower]))
+    const wordScore = calculateWordScore(currentWord);
+    setScore(prev => prev + wordScore);
+    setWordsFound(prev => prev + 1);
+    setUsedWords(prev => new Set([...prev, wordLower]));
     setFeedback({
       message: `+${wordScore} points!`,
       type: 'success',
       timestamp: Date.now()
-    })
-    playSound('wordSuccess')
-    clearSelection()
-  }
+    });
+    playSound('wordSuccess');
+    clearSelection();
+  };
 
   // Reset game state
   const resetGame = () => {
@@ -336,37 +368,50 @@ const App = () => {
     }
   }, [currentScreen])
 
-  // Initialize audio only after user interaction
-  const initializeAudio = () => {
+  // Update initializeAudio to remove the playSound function definition
+  const initializeAudio = async () => {
     try {
       if (!audioContext.current) {
+        console.log('Creating new AudioContext...')
         const AudioContextClass = window.AudioContext || window.webkitAudioContext
         audioContext.current = new AudioContextClass()
+        console.log('AudioContext created:', audioContext.current.state)
       }
 
       const ctx = audioContext.current
       if (ctx.state === 'suspended') {
-        ctx.resume()
+        console.log('Resuming suspended AudioContext...')
+        await ctx.resume()
+        console.log('AudioContext resumed:', ctx.state)
       }
 
       const createSound = (freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.1) => {
         return () => {
-          if (!ctx || ctx.state !== 'running') return
+          if (!ctx || ctx.state !== 'running') {
+            console.warn('AudioContext not available or not running:', ctx?.state)
+            return
+          }
           
-          const oscillator = ctx.createOscillator()
-          const gain = ctx.createGain()
-          
-          oscillator.type = type
-          oscillator.frequency.setValueAtTime(freq, ctx.currentTime)
-          
-          gain.gain.setValueAtTime(volume, ctx.currentTime)
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
-          
-          oscillator.connect(gain)
-          gain.connect(ctx.destination)
-          
-          oscillator.start(ctx.currentTime)
-          oscillator.stop(ctx.currentTime + duration)
+          try {
+            const oscillator = ctx.createOscillator()
+            const gain = ctx.createGain()
+            
+            oscillator.type = type
+            oscillator.frequency.setValueAtTime(freq, ctx.currentTime)
+            
+            gain.gain.setValueAtTime(volume, ctx.currentTime)
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+            
+            oscillator.connect(gain)
+            gain.connect(ctx.destination)
+            
+            oscillator.start(ctx.currentTime)
+            oscillator.stop(ctx.currentTime + duration)
+            
+            console.log(`Playing sound: freq=${freq}, duration=${duration}, type=${type}`)
+          } catch (error) {
+            console.error('Error playing sound:', error)
+          }
         }
       }
 
@@ -379,6 +424,7 @@ const App = () => {
       }
 
       setAudioInitialized(true)
+      console.log('Audio initialization complete')
     } catch (error) {
       console.error('Failed to initialize audio:', error)
     }
@@ -388,30 +434,31 @@ const App = () => {
   useEffect(() => {
     const handleInteraction = () => {
       if (!audioInitialized) {
+        console.log('User interaction detected, initializing audio...')
         initializeAudio()
-        document.removeEventListener('click', handleInteraction)
-        document.removeEventListener('keydown', handleInteraction)
       }
     }
 
+    // Add listeners for both click and keydown
     document.addEventListener('click', handleInteraction)
     document.addEventListener('keydown', handleInteraction)
 
+    // Only remove listeners and cleanup when component unmounts
     return () => {
       document.removeEventListener('click', handleInteraction)
       document.removeEventListener('keydown', handleInteraction)
-      if (audioContext.current) {
+    }
+  }, [audioInitialized]) // Only depend on audioInitialized
+
+  // Add separate effect for AudioContext cleanup
+  useEffect(() => {
+    return () => {
+      if (audioContext.current?.state === 'running') {
+        console.log('Cleaning up AudioContext on unmount')
         audioContext.current.close()
       }
     }
-  }, [audioInitialized])
-
-  // Safe sound playing function
-  const playSound = (soundName: string) => {
-    if (audioInitialized && sounds.current[soundName]) {
-      sounds.current[soundName]()
-    }
-  }
+  }, []) // Empty dependency array - only run on unmount
 
   // Shuffle tiles while maintaining letter properties
   const shuffleTiles = () => {
@@ -556,6 +603,8 @@ const App = () => {
         <LobbyScreen 
           players={DUMMY_PLAYERS.joiningPlayers}
           onStart={handleStartGame}
+          isSoundEnabled={isSoundEnabled}
+          onToggleSound={() => setIsSoundEnabled(!isSoundEnabled)}
         />
       )}
       {currentScreen === 'game' && (
@@ -568,12 +617,15 @@ const App = () => {
           selectedTiles={selectedTiles}
           usedWords={usedWords}
           activePlayers={DUMMY_PLAYERS.activePlayers}
+          dictionary={dictionary}
           onTileClick={handleTileClick}
           onSubmitWord={handleWordSubmit}
           onClear={clearSelection}
           onShuffle={shuffleTiles}
           calculateWordScore={calculateWordScore}
           feedback={feedback}
+          setFeedback={setFeedback}
+          playSound={playSound}
         />
       )}
       {currentScreen === 'end' && (
@@ -595,16 +647,25 @@ const App = () => {
   )
 }
 
-const LobbyScreen: React.FC<{
-  players: typeof DUMMY_PLAYERS.joiningPlayers
-  onStart: () => void
-}> = ({ players, onStart }) => {
+const LobbyScreen: React.FC<LobbyScreenProps> = ({ 
+  players, 
+  onStart, 
+  isSoundEnabled, 
+  onToggleSound 
+}) => {
   return (
     <div className="screen lobby-screen active">
       <div className="header">
         <div className="header-column title">
           <h1>WORDBLITZ</h1>
         </div>
+        <button 
+          className="sound-toggle"
+          onClick={onToggleSound}
+          aria-label={isSoundEnabled ? 'Mute sound' : 'Unmute sound'}
+        >
+          {isSoundEnabled ? '🔊' : '🔇'}
+        </button>
       </div>
       <div className="game-columns">
         <div className="column">
@@ -627,12 +688,13 @@ const LobbyScreen: React.FC<{
               Start Game
             </button>
           </div>
-          <h2>How To Play</h2>
+
+          <h3 style={{ textAlign: 'center' }}>How To Play</h3>
           <div className="instructions">
-            <p>• Create words using the letter tiles</p>
-            <p>• All words must be in the dictionary</p>
-            <p>• Longer words score more points</p>
-            <p>• Beat the clock and other players!</p>
+            <p style={{ textAlign: 'center' }}>• Create words using the letter tiles</p>
+            <p style={{ textAlign: 'center' }}>• All words must be in the dictionary</p>
+            <p style={{ textAlign: 'center' }}>• Longer words score more points</p>
+            <p style={{ textAlign: 'center' }}>• Beat the clock and other players!</p>
           </div>
         </div>
         <div className="column">
@@ -658,13 +720,60 @@ const GameScreen: React.FC<GameScreenProps> = ({
   tiles,
   usedWords,
   activePlayers,
+  dictionary,
   onTileClick,
   onSubmitWord,
   onClear,
   onShuffle,
   calculateWordScore,
-  feedback
+  feedback,
+  setFeedback,
+  playSound
 }) => {
+  const [validationStatus, setValidationStatus] = useState<'none' | 'valid' | 'invalid'>('none');
+
+  const handleSubmit = () => {
+    const wordLower = currentWord.toLowerCase();
+    
+    if (currentWord.length < 3) {
+      setValidationStatus('invalid');
+      setFeedback({
+        message: 'Word must be at least 3 letters long',
+        type: 'error',
+        timestamp: Date.now()
+      });
+      playSound('wordError');
+    } else if (usedWords.has(wordLower)) {
+      setValidationStatus('invalid');
+      setFeedback({
+        message: 'Word already found!',
+        type: 'error',
+        timestamp: Date.now()
+      });
+      playSound('wordError');
+    } else if (!dictionary.has(wordLower)) {
+      setValidationStatus('invalid');
+      setFeedback({
+        message: 'Word not in dictionary!',
+        type: 'error',
+        timestamp: Date.now()
+      });
+      playSound('wordError');
+    } else {
+      setValidationStatus('valid');
+      onSubmitWord();
+    }
+
+    // Reset validation status after animation
+    setTimeout(() => {
+      setValidationStatus('none');
+      onClear();
+    }, 1000);
+  };
+
+  // Calculate progress percentage (assuming game starts at 60 seconds)
+  const timeProgress = (timeLeft / 60) * 100
+
   return (
     <div className="screen game-screen active">
       <div className="header">
@@ -678,6 +787,15 @@ const GameScreen: React.FC<GameScreenProps> = ({
             <span className={`time-left ${timeLeft <= 10 ? 'warning' : ''}`}>
               {timeLeft}s
             </span>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill"
+                style={{ 
+                  width: `${timeProgress}%`,
+                  backgroundColor: timeLeft <= 10 ? '#ff4444' : '#4CAF50'
+                }}
+              />
+            </div>
           </div>
         </div>
         <div className="header-column">
@@ -688,7 +806,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
       <div className="game-columns">
         <div className="column">
-          <h2>LEADERBOARD</h2>
+          <h2>Leaderboard</h2>
           <div className="leaderboard">
             {activePlayers.map((player) => (
               <div key={player.id} className="player-row">
@@ -701,16 +819,17 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
         <div className="column center">
           <div className="game-area">
-            <div className="word-display">
-              <span className="current-word">{currentWord}</span>
+            <div className={`word-display ${validationStatus}`}>
               {feedback && (
                 <div 
                   className={`feedback ${feedback.type}`}
                   key={feedback.timestamp}
+                  onAnimationEnd={() => setFeedback(null)}
                 >
                   {feedback.message}
                 </div>
               )}
+              <span className="current-word">{currentWord}</span>
             </div>
             
             <div className="tile-grid">
@@ -739,8 +858,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
               <button
                 className="control-button submit"
-                onClick={onSubmitWord}
-                disabled={currentWord.length < 3}
+                onClick={handleSubmit}
+                disabled={currentWord.length < 1}
               >
                 <span className="icon">✓</span>
                 Submit
@@ -760,7 +879,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         </div>
 
         <div className="column">
-          <h2>WORDS FOUND</h2>
+          <h2>Words Found</h2>
           <div className="words-list">
             {Array.from(usedWords).map((word, index) => (
               <div key={index} className="word-item">
@@ -856,33 +975,28 @@ const EndScreen: React.FC<{
 }
 
 // Add animations CSS
-const gameAnimations = `
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    75% { transform: translateX(5px); }
-  }
+// const gameAnimations = `
+//   @keyframes shake {
+//     0%, 100% { transform: translateX(0); }
+//     25% { transform: translateX(-5px); }
+//     75% { transform: translateX(5px); }
+//   }
+//
+//   @keyframes fadeIn {
+//     from { opacity: 0; transform: translateY(-10px); }
+//     to { opacity: 1; transform: translateY(0); }
+//   }
+//
+//   @keyframes scorePopup {
+//     0% { transform: translateY(0) scale(1); opacity: 1; }
+//     100% { transform: translateY(-20px) scale(1.2); opacity: 0; }
+//   }
+//
+//   @keyframes pulse {
+//     0% { transform: scale(1); }
+//     50% { transform: scale(1.05); }
+//     100% { transform: scale(1); }
+//   }
+// `
 
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  @keyframes scorePopup {
-    0% { transform: translateY(0) scale(1); opacity: 1; }
-    100% { transform: translateY(-20px) scale(1.2); opacity: 0; }
-  }
-
-  @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-  }
-`
-
-// Add the animations to the document
-const style = document.createElement('style')
-style.textContent = gameAnimations
-document.head.appendChild(style)
-
-export default App 
+export default App;
