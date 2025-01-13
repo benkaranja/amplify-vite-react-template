@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useAuth } from './MultiplayerHelper';
 import './App.css'
 
 // Constants
@@ -83,6 +84,10 @@ interface LobbyScreenProps {
   onStart: () => void
   isSoundEnabled: boolean
   onToggleSound: () => void
+  isAuthenticated: boolean
+  signIn: () => void
+  username: string
+  signOut: () => void
 }
 
 // @ts-ignore - Will be used in future implementation
@@ -103,7 +108,7 @@ interface GameScreenProps {
   calculateWordScore: (word: string) => number
   feedback: GameFeedback | null
   setFeedback: (feedback: GameFeedback | null) => void
-  playSound: (soundName: string) => void
+  playSound: (type: SoundType) => void
 }
 
 // @ts-ignore - Will be used in future implementation
@@ -149,6 +154,25 @@ interface GameFeedback {
   timestamp: number
 }
 
+// Define sound frequencies outside the component
+const SOUNDS = Object.freeze({
+  START: 440.0,    // A4 note
+  CLICK: 600.0,    // Button click
+  SUCCESS: 800.0,  // Correct word
+  ERROR: 200.0,    // Error
+  GAME_OVER: 300.0,// Game over sound
+  SHUFFLE: 700.0,  // Shuffle sound
+  WORD_FOUND: 900.0 // Word found sound
+});
+
+// Ensure type safety for sound types
+type SoundType = keyof typeof SOUNDS;
+
+interface AudioContextState {
+  context: AudioContext | null;
+  gainNode: GainNode | null;
+}
+
 const App = () => {
   const [currentScreen, setCurrentScreen] = useState<'lobby' | 'game' | 'end'>('lobby')
   const [timeLeft, setTimeLeft] = useState(60)
@@ -158,39 +182,92 @@ const App = () => {
   const [selectedTiles, setSelectedTiles] = useState<number[]>([])
   const [usedWords, setUsedWords] = useState<Set<string>>(new Set())
   const [tiles, setTiles] = useState<Tile[]>([])
-  const [audioInitialized, setAudioInitialized] = useState(false)
   const [dictionary, setDictionary] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
   const [feedback, setFeedback] = useState<GameFeedback | null>(null)
   const [isSoundEnabled, setIsSoundEnabled] = useState(true)
   
   const audioContext = useRef<AudioContext | null>(null)
-  const sounds = useRef<{[key: string]: () => void}>({})
   const gameTimer = useRef<NodeJS.Timeout | null>(null)
+  // Add a ref to track audio context state
+  const audioState = useRef<AudioContextState>({
+    context: null,
+    gainNode: null
+  })
 
-  // Move playSound to component level
-  const playSound = (soundName: string) => {
-    if (!isSoundEnabled || !audioInitialized || !sounds.current[soundName]) {
+  const { isAuthenticated, signOut, username, signIn } = useAuth();
+
+    
+
+  // Function to safely create audio context
+  const createAudioContext = () => {
+    if (!audioState.current.context) {
+      try {
+        const context = new AudioContext();
+        const gainNode = context.createGain();
+        gainNode.connect(context.destination);
+        audioState.current = { context, gainNode };
+      } catch (error) {
+        console.error('Failed to create AudioContext:', error);
+      }
+    }
+    return audioState.current;
+  }
+
+  // Function to safely cleanup audio context
+  const cleanupAudioContext = () => {
+    try {
+      if (audioState.current.context?.state !== 'closed') {
+        audioState.current.context?.close();
+      }
+      audioState.current = { context: null, gainNode: null };
+    } catch (error) {
+      console.error('Failed to cleanup AudioContext:', error);
+    }
+  }
+
+  // Function to play sound
+  const playSound = (type: SoundType) => {
+    if (!isSoundEnabled) return;
+    console.log('Playing sound:', type); // Debug log
+
+    // Get frequency and validate it exists
+    const frequency = SOUNDS[type];
+    if (frequency === undefined) {
+      console.error(`Sound type "${type}" not found in SOUNDS`);
       return;
     }
-    
-    if (audioContext.current?.state !== 'running') {
-      console.warn('AudioContext not running, attempting to resume...')
-      audioContext.current?.resume().then(() => {
-        console.log('AudioContext resumed, playing sound...')
-        try {
-          sounds.current[soundName]()
-        } catch (error) {
-          console.error(`Error playing sound "${soundName}":`, error)
-        }
-      })
-      return
-    }
-    
+
     try {
-      sounds.current[soundName]()
+      const { context, gainNode } = createAudioContext();
+      if (!context || !gainNode) {
+        console.error('Audio context or gain node not available');
+        return;
+      }
+
+      const oscillator = context.createOscillator();
+      oscillator.connect(gainNode);
+      
+      const currentTime = context.currentTime;
+      
+      // Set the frequency and volume
+      oscillator.frequency.value = frequency;
+      gainNode.gain.setValueAtTime(0.1, currentTime);
+      
+      // Play the sound
+      oscillator.start(currentTime);
+      oscillator.stop(currentTime + 0.1);
+      
+      // Cleanup
+      oscillator.onended = () => {
+        try {
+          oscillator.disconnect();
+        } catch (error) {
+          console.error('Error disconnecting oscillator:', error);
+        }
+      };
     } catch (error) {
-      console.error(`Error playing sound "${soundName}":`, error)
+      console.error('Error playing sound:', error);
     }
   }
 
@@ -240,7 +317,7 @@ const App = () => {
 
   // Handle tile click without adjacency requirement
   const handleTileClick = (index: number) => {
-    playSound('tileClick')
+    playSound('CLICK')
     
     const newSelectedTiles = [...selectedTiles, index]
     setSelectedTiles(newSelectedTiles)
@@ -268,7 +345,7 @@ const App = () => {
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
       clearSelection();
       return;
     }
@@ -281,7 +358,7 @@ const App = () => {
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
       clearSelection();
       return;
     }
@@ -292,7 +369,7 @@ const App = () => {
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
       clearSelection();
       return;
     }
@@ -306,34 +383,47 @@ const App = () => {
       type: 'success',
       timestamp: Date.now()
     });
-    playSound('wordSuccess');
+    playSound('SUCCESS');
     clearSelection();
   };
 
   // Reset game state
   const resetGame = () => {
-    setScore(0)
-    setWordsFound(0)
-    setTimeLeft(60)
-    setCurrentWord('')
-    setSelectedTiles([])
-    setUsedWords(new Set())
-    generateInitialTiles()
-    playSound('gameOver')
+    try {
+      playSound('START');
+      setScore(0)
+      setWordsFound(0)
+      setTimeLeft(60)
+      setCurrentWord('')
+      setSelectedTiles([])
+      setUsedWords(new Set())
+      generateInitialTiles()
+      playSound('GAME_OVER');
+    } catch (error) {
+      console.error('Error in resetGame:', error);
+    }
   }
 
   // Start game handler
   const handleStartGame = () => {
-    resetGame()
-    setCurrentScreen('game')
-    playSound('wordSuccess')
+    try {
+      if (isAuthenticated) {
+        playSound('START');
+        resetGame()
+        setCurrentScreen('game')
+      } else {
+        signIn()
+      }
+    } catch (error) {
+      console.error('Error in handleStartGame:', error);
+    }
   }
 
   // Return to lobby handler
   const handleReturnToLobby = () => {
     resetGame()
     setCurrentScreen('lobby')
-    playSound('shuffle')
+    playSound('SHUFFLE')
   }
 
   // Audio cleanup
@@ -368,97 +458,18 @@ const App = () => {
     }
   }, [currentScreen])
 
-  // Update initializeAudio to remove the playSound function definition
-  const initializeAudio = async () => {
-    try {
-      if (!audioContext.current) {
-        console.log('Creating new AudioContext...')
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext
-        audioContext.current = new AudioContextClass()
-        console.log('AudioContext created:', audioContext.current.state)
+  // Handle sound toggle
+  const handleSoundToggle = () => {
+    setIsSoundEnabled(prev => {
+      if (!prev) {
+        createAudioContext();
+      } else {
+        cleanupAudioContext();
       }
-
-      const ctx = audioContext.current
-      if (ctx.state === 'suspended') {
-        console.log('Resuming suspended AudioContext...')
-        await ctx.resume()
-        console.log('AudioContext resumed:', ctx.state)
-      }
-
-      const createSound = (freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.1) => {
-        return () => {
-          if (!ctx || ctx.state !== 'running') {
-            console.warn('AudioContext not available or not running:', ctx?.state)
-            return
-          }
-          
-          try {
-            const oscillator = ctx.createOscillator()
-            const gain = ctx.createGain()
-            
-            oscillator.type = type
-            oscillator.frequency.setValueAtTime(freq, ctx.currentTime)
-            
-            gain.gain.setValueAtTime(volume, ctx.currentTime)
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
-            
-            oscillator.connect(gain)
-            gain.connect(ctx.destination)
-            
-            oscillator.start(ctx.currentTime)
-            oscillator.stop(ctx.currentTime + duration)
-            
-            console.log(`Playing sound: freq=${freq}, duration=${duration}, type=${type}`)
-          } catch (error) {
-            console.error('Error playing sound:', error)
-          }
-        }
-      }
-
-      sounds.current = {
-        tileClick: createSound(800, 0.1, 'sine', 0.05),
-        wordSuccess: createSound(440, 0.2, 'sine', 0.1),
-        wordError: createSound(200, 0.3, 'square', 0.1),
-        gameOver: createSound(300, 0.5, 'sawtooth', 0.1),
-        shuffle: createSound(600, 0.2, 'triangle', 0.05)
-      }
-
-      setAudioInitialized(true)
-      console.log('Audio initialization complete')
-    } catch (error) {
-      console.error('Failed to initialize audio:', error)
-    }
-  }
-
-  // Handle user interaction for audio
-  useEffect(() => {
-    const handleInteraction = () => {
-      if (!audioInitialized) {
-        console.log('User interaction detected, initializing audio...')
-        initializeAudio()
-      }
-    }
-
-    // Add listeners for both click and keydown
-    document.addEventListener('click', handleInteraction)
-    document.addEventListener('keydown', handleInteraction)
-
-    // Only remove listeners and cleanup when component unmounts
-    return () => {
-      document.removeEventListener('click', handleInteraction)
-      document.removeEventListener('keydown', handleInteraction)
-    }
-  }, [audioInitialized]) // Only depend on audioInitialized
-
-  // Add separate effect for AudioContext cleanup
-  useEffect(() => {
-    return () => {
-      if (audioContext.current?.state === 'running') {
-        console.log('Cleaning up AudioContext on unmount')
-        audioContext.current.close()
-      }
-    }
-  }, []) // Empty dependency array - only run on unmount
+      return !prev;
+    });
+    playSound('CLICK');
+  };
 
   // Shuffle tiles while maintaining letter properties
   const shuffleTiles = () => {
@@ -471,7 +482,7 @@ const App = () => {
       return newTiles.map(tile => ({ ...tile, isActive: false }))
     })
     clearSelection()
-    playSound('shuffle')
+    playSound('SHUFFLE')
   }
 
   // Word List Management
@@ -604,7 +615,11 @@ const App = () => {
           players={DUMMY_PLAYERS.joiningPlayers}
           onStart={handleStartGame}
           isSoundEnabled={isSoundEnabled}
-          onToggleSound={() => setIsSoundEnabled(!isSoundEnabled)}
+          onToggleSound={handleSoundToggle}
+          isAuthenticated={isAuthenticated}
+          signIn={signIn}
+          username={username}
+          signOut={signOut}
         />
       )}
       {currentScreen === 'game' && (
@@ -651,14 +666,27 @@ const LobbyScreen: React.FC<LobbyScreenProps> = ({
   players, 
   onStart, 
   isSoundEnabled, 
-  onToggleSound 
+  onToggleSound, 
+  isAuthenticated, 
+  signIn,
+  username,
+  signOut 
 }) => {
+  const [showGuestInput, setShowGuestInput] = useState(false);
+  const [guestName, setGuestName] = useState('');
+  const { setGuestName: setAuthGuestName } = useAuth();
+
+  const handleGuestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (guestName.trim()) {
+      setAuthGuestName(guestName.trim());
+      setShowGuestInput(false);
+    }
+  };
+
   return (
     <div className="screen lobby-screen active">
       <div className="header">
-        <div className="header-column title">
-          <h1>WORDBLITZ</h1>
-        </div>
         <button 
           className="sound-toggle"
           onClick={onToggleSound}
@@ -666,6 +694,17 @@ const LobbyScreen: React.FC<LobbyScreenProps> = ({
         >
           {isSoundEnabled ? '🔊' : '🔇'}
         </button>
+        <div className="header-column title">
+          <h1>WORDBLITZ</h1>
+        </div>
+        {isAuthenticated && (
+          <button 
+            className="sign-out-button"
+            onClick={signOut}
+          >
+            Sign Out
+          </button>
+        )}
       </div>
       <div className="game-columns">
         <div className="column">
@@ -680,18 +719,72 @@ const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
         </div>
         <div className="column center">
-          <div className="start-game-container">
-            <button 
-              className="start-game-button"
-              onClick={onStart}
-            >
-              Start Game
-            </button>
-          </div>
-
+          {isAuthenticated ? (
+            <>
+              <div className="welcome-message">
+                <p>Welcome, {username}!</p>
+              </div>
+              <div className="start-game-container">
+                <button 
+                  className="start-game-button"
+                  onClick={onStart}
+                >
+                  Start Game
+                </button>
+              </div>
+            </>
+          ) : showGuestInput ? (
+            <form onSubmit={handleGuestSubmit} className="guest-form">
+              <input
+                type="text"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Enter nickname..."
+                maxLength={15}
+                className="guest-input"
+              />
+              <div className="guest-buttons">
+                <button type="submit" className="start-game-button">
+                  Play as Guest
+                </button>
+                <button 
+                  type="button" 
+                  className="secondary-button"
+                  onClick={() => setShowGuestInput(false)}
+                >
+                  Back
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="start-game-container">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button 
+                  className="start-game-button"
+                  onClick={signIn}
+                >
+                  Sign In
+                </button>
+                <button 
+                  className="secondary-button"
+                  onClick={() => setShowGuestInput(true)}
+                  style={{ 
+                    backgroundColor: '#2a2e33',
+                    padding: '15px 30px',
+                    borderRadius: '4px',
+                    fontSize: '18px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  Play as Guest
+                </button>
+              </div>
+            </div>
+          )}
           <h3 style={{ textAlign: 'center' }}>How To Play</h3>
           <div className="instructions">
-            <p style={{ textAlign: 'center' }}>• Create words using the letter tiles</p>
             <p style={{ textAlign: 'center' }}>• All words must be in the dictionary</p>
             <p style={{ textAlign: 'center' }}>• Longer words score more points</p>
             <p style={{ textAlign: 'center' }}>• Beat the clock and other players!</p>
@@ -709,8 +802,8 @@ const LobbyScreen: React.FC<LobbyScreenProps> = ({
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 const GameScreen: React.FC<GameScreenProps> = ({
   score,
@@ -742,7 +835,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
     } else if (usedWords.has(wordLower)) {
       setValidationStatus('invalid');
       setFeedback({
@@ -750,7 +843,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
     } else if (!dictionary.has(wordLower)) {
       setValidationStatus('invalid');
       setFeedback({
@@ -758,7 +851,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         type: 'error',
         timestamp: Date.now()
       });
-      playSound('wordError');
+      playSound('ERROR');
     } else {
       setValidationStatus('valid');
       onSubmitWord();

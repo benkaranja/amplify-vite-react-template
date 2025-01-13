@@ -1,7 +1,12 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { Authenticator } from '@aws-amplify/ui-react';
+import { Amplify } from 'aws-amplify';
 import App from './App'
+import { AuthWrapper } from './MultiplayerHelper';
+import outputs from '../amplify_outputs.json';
 import './index.css'
+import '@aws-amplify/ui-react/styles.css';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<
@@ -52,34 +57,17 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-// Performance Monitoring
-const reportWebVitals = (metric: any) => {
-  // You can send the metric to your analytics service here
-  console.log(metric)
-}
+Amplify.configure(outputs);
 
-// Root Element Check
-const rootElement = document.getElementById('root')
-
-if (!rootElement) {
-  throw new Error('Failed to find the root element')
-}
-
-// Create Root and Render
-const root = ReactDOM.createRoot(rootElement)
-
+const root = ReactDOM.createRoot(document.getElementById('root')!);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <Authenticator.Provider>
+        <AuthWrapper>
+          <App />
+        </AuthWrapper>
+      </Authenticator.Provider>
     </ErrorBoundary>
   </React.StrictMode>
-)
-
-// Report Web Vitals
-reportWebVitals(window.performance)
-
-// Enable Hot Module Replacement (HMR)
-if (import.meta.hot) {
-  import.meta.hot.accept()
-} 
+); 
